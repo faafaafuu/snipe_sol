@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -35,17 +36,19 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         .up{color:var(--green);font-weight:650}.down{color:var(--red);font-weight:650}.empty{padding:28px;text-align:center;color:var(--muted)}
         .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 8px;font-size:12px;border:1px solid var(--line);background:#fff}.ok{color:var(--green);border-color:#b7e4c7;background:#f0fff4}.fail{color:var(--red);border-color:#ffc9c9;background:#fff5f5}.wait{color:var(--amber);border-color:#ffe0a3;background:#fff9db}
         .detail h2{font-size:18px;margin:0 0 2px}.detail .mintline{font-size:12px;color:var(--muted);word-break:break-all}.score{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.checks{display:grid;gap:8px;margin-top:10px}.check{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:start;border-top:1px solid var(--line);padding-top:8px}.check strong{font-size:13px}.check small{display:block;color:var(--muted)}.reasons{margin-top:12px}.reason{font-size:12px;color:#6b1f1f;background:#fff5f5;border:1px solid #ffd6d6;border-radius:6px;padding:7px;margin-top:6px}
+        a.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;padding:5px 8px;color:#111;text-decoration:none;background:#fff;font-size:12px;font-weight:650}a.btn:hover{background:#eef2f7}.accepted{margin-top:14px}.accepted-list{display:flex;gap:8px;overflow:auto;padding:10px}.accepted-card{min-width:210px;border:1px solid #b7e4c7;background:#f0fff4;border-radius:8px;padding:9px}.accepted-card strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.accepted-card .meta{margin:3px 0 8px}
         @keyframes flash{from{background:#ecfdf3}to{background:transparent}}
         @media(max-width:900px){.layout{grid-template-columns:1fr}.detail{order:-1}}@media(max-width:720px){main{margin:16px auto}th:nth-child(2),td:nth-child(2){display:none}th,td{padding:10px 8px}}
         </style></head><body>
         <main>
           <header><div><h1>Pump Scanner</h1><div class="meta">Paper mode · candidates newest first · click a token for entry checks</div></div><div id="count" class="meta">0 tokens</div></header>
           <div id="stats" class="stats"></div>
+          <section class="panel accepted"><div class="pad" style="padding-bottom:0"><strong>Accepted / Ready</strong><div class="meta">Open strongest candidates in GMGN</div></div><div id="accepted" class="accepted-list"><div class="meta">No accepted tokens yet.</div></div></section>
           <div class="layout" style="margin-top:14px">
             <section>
               <table>
-                <thead><tr><th>Name</th><th>Mint</th><th>Price</th><th>Volume</th><th>Buyers</th><th>Age</th><th>Entry</th></tr></thead>
-                <tbody id="tokens"><tr><td class="empty" colspan="7">Waiting for tokens...</td></tr></tbody>
+                <thead><tr><th>Name</th><th>Mint</th><th>Price</th><th>Volume</th><th>Buyers</th><th>Age</th><th>Entry</th><th>Open</th></tr></thead>
+                <tbody id="tokens"><tr><td class="empty" colspan="8">Waiting for tokens...</td></tr></tbody>
               </table>
             </section>
             <aside class="panel detail"><div id="detail" class="pad"><div class="empty">Select a token</div></div></aside>
@@ -53,7 +56,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         </main>
         <script>
         const tbody=document.getElementById('tokens'), count=document.getElementById('count');
-        const detail=document.getElementById('detail'), stats=document.getElementById('stats');
+        const detail=document.getElementById('detail'), stats=document.getElementById('stats'), accepted=document.getElementById('accepted');
         const seen=new Set(); const byMint=new Map(); let rows=[], selected=null;
         const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
         const price=v=>Number(v||0).toLocaleString(undefined,{maximumFractionDigits:6});
@@ -61,10 +64,11 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         const age=s=>{s=Math.max(0,Math.floor(s||0));return s<60?s+'s':Math.floor(s/60)+'m'};
         const badge=(cls,text)=>`<span class="badge ${cls}">${text}</span>`;
         const stateClass=s=>s==='ok'?'ok':s==='fail'?'fail':'wait';
+        const gmgn=m=>`https://gmgn.ai/sol/token/${encodeURIComponent(m)}`;
         function row(t){
           const dir=Number(t.change_pct||0)>=0?'up':'down';
           const cls=t.mint===selected?' selected':'';
-          return `<tr class="new${cls}" data-mint="${esc(t.mint)}"><td class="name">${esc(t.name||t.symbol||'Unknown')}</td><td class="mint">${esc(t.mint)}</td><td class="${dir}">${price(t.price)}</td><td>${compact(t.volume)}</td><td>${Number(t.buyers||0)}</td><td>${age(t.age_seconds)}</td><td>${badge(stateClass(t.entry_state),esc(t.entry_label))}</td></tr>`;
+          return `<tr class="new${cls}" data-mint="${esc(t.mint)}"><td class="name">${esc(t.name||t.symbol||'Unknown')}</td><td class="mint">${esc(t.mint)}</td><td class="${dir}">${price(t.price)}</td><td>${compact(t.volume)}</td><td>${Number(t.buyers||0)}</td><td>${age(t.age_seconds)}</td><td>${badge(stateClass(t.entry_state),esc(t.entry_label))}</td><td><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GMGN</a></td></tr>`;
         }
         function render(items){
           const fresh=[];
@@ -83,7 +87,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         function showDetail(t){
           if(!t)return;
           detail.innerHTML=`<h2>${esc(t.name||t.symbol||'Unknown')}</h2><div class="mintline">${esc(t.mint)}</div>
-          <div class="score">${badge(stateClass(t.entry_state),esc(t.entry_label))}${badge('wait',`${t.ok_count}/${t.total_checks} ok`)}${badge('fail',`${t.fail_count} fail`)}${badge('wait',`${t.wait_count} wait`)}</div>
+          <div class="score">${badge(stateClass(t.entry_state),esc(t.entry_label))}${badge('wait',`${t.ok_count}/${t.total_checks} ok`)}${badge('fail',`${t.fail_count} fail`)}${badge('wait',`${t.wait_count} wait`)}<a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">Open GMGN</a></div>
           <div class="stats"><div class="stat"><b>${price(t.price)}</b><span class="meta">price</span></div><div class="stat"><b>${compact(t.volume)}</b><span class="meta">volume</span></div><div class="stat"><b>${Number(t.buyers||0)}</b><span class="meta">buyers</span></div><div class="stat"><b>${age(t.age_seconds)}</b><span class="meta">age</span></div></div>
           <div class="checks">${t.checks.map(c=>`<div class="check"><div>${badge(stateClass(c.state),c.state)}</div><div><strong>${esc(c.label)}</strong><small>${esc(c.actual)} · target ${esc(c.target)}</small></div></div>`).join('')}</div>
           <div class="reasons">${(t.reasons||[]).slice(0,6).map(r=>`<div class="reason">${esc(r)}</div>`).join('')||'<div class="meta">No skip reason yet.</div>'}</div>`;
@@ -93,12 +97,16 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
           if(!s)return; const p=s.performance||{};
           stats.innerHTML=`<div class="stat"><b>${Number(s.balance_sol||0).toFixed(3)} SOL</b><span class="meta">paper balance</span></div><div class="stat"><b>${p.signals||0}</b><span class="meta">signals</span></div><div class="stat"><b>${p.accepted_signals||0}</b><span class="meta">accepted</span></div><div class="stat"><b>${p.skipped_signals||0}</b><span class="meta">skipped</span></div><div class="stat"><b>${(s.positions||[]).length}</b><span class="meta">positions</span></div>`;
         }
+        function renderAccepted(items){
+          const list=items.filter(t=>t.entry_state==='ok'||t.accepted).slice(0,12);
+          accepted.innerHTML=list.length?list.map(t=>`<div class="accepted-card"><strong>${esc(t.name||t.symbol||'Unknown')}</strong><div class="meta">${esc(t.mint)}</div><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">Open GMGN</a></div>`).join(''):'<div class="meta">No accepted tokens yet.</div>';
+        }
         tbody.addEventListener('click',e=>{const tr=e.target.closest('tr[data-mint]');if(!tr)return;selected=tr.dataset.mint;showDetail(byMint.get(selected));});
         let timer; async function poll(){
           clearTimeout(timer);
           try{
             const [tokens,status]=await Promise.all([fetch('/api/tokens?limit=50',{cache:'no-store'}).then(r=>r.json()),fetch('/api/status',{cache:'no-store'}).then(r=>r.json())]);
-            render(tokens); renderStats(status);
+            render(tokens); renderStats(status); renderAccepted(tokens);
           }catch(e){console.warn(e)}
           timer=setTimeout(poll,2000);
         } poll();
@@ -108,7 +116,12 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
     @app.get("/api/status")
     async def status() -> dict:
         balance = await bot.broker.balance_sol() if bot else 0.0
-        positions = [p.__dict__ | {"take_profit_hits": list(p.take_profit_hits)} for p in bot.positions.values()] if bot else []
+        positions = []
+        if bot:
+            for p in bot.positions.values():
+                item = asdict(p)
+                item["take_profit_hits"] = list(p.take_profit_hits)
+                positions.append(item)
         return {"balance_sol": balance, "positions": positions, "performance": repo.performance_snapshot()}
 
     @app.get("/api/trades")
@@ -143,14 +156,23 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
 
     @app.get("/api/tokens")
     async def tokens(limit: int = 50) -> list[dict]:
-        rows = repo.last_raw_events(min(max(limit, 1), 200))
-        latest_by_mint = {}
-        for row in rows:
-            latest_by_mint.setdefault(row.mint, row)
-        signal_map = {s.mint: s for s in repo.last_signals(500)}
-        return [_event_to_token(row, bot, signal_map.get(row.mint)) for row in latest_by_mint.values()][:limit]
+        return _token_rows(repo, bot, limit)
+
+    @app.get("/api/accepted")
+    async def accepted(limit: int = 20) -> list[dict]:
+        all_tokens = _token_rows(repo, bot, 200)
+        return [t for t in all_tokens if t["entry_state"] == "ok" or t.get("accepted")][:limit]
 
     return app
+
+
+def _token_rows(repo: Repository, bot: SniperBot | None, limit: int) -> list[dict]:
+    rows = repo.last_raw_events(min(max(limit, 1), 200))
+    latest_by_mint = {}
+    for row in rows:
+        latest_by_mint.setdefault(row.mint, row)
+    signal_map = {s.mint: s for s in repo.last_signals(500)}
+    return [_event_to_token(row, bot, signal_map.get(row.mint)) for row in latest_by_mint.values()][:limit]
 
 
 def _event_to_token(row, bot: SniperBot | None = None, signal=None) -> dict:
@@ -173,7 +195,10 @@ def _event_to_token(row, bot: SniperBot | None = None, signal=None) -> dict:
     ok_count = sum(1 for c in checks if c["state"] == "ok")
     fail_count = sum(1 for c in checks if c["state"] == "fail")
     wait_count = sum(1 for c in checks if c["state"] == "wait")
-    if fail_count:
+    accepted = bool(signal and signal.passed)
+    if accepted:
+        entry_state, entry_label = "ok", "accepted"
+    elif fail_count:
         entry_state, entry_label = "fail", "not ready"
     elif wait_count:
         entry_state, entry_label = "wait", "watching"
@@ -193,6 +218,7 @@ def _event_to_token(row, bot: SniperBot | None = None, signal=None) -> dict:
         "buy_velocity": velocity,
         "entry_state": entry_state,
         "entry_label": entry_label,
+        "accepted": accepted,
         "checks": checks,
         "ok_count": ok_count,
         "fail_count": fail_count,
