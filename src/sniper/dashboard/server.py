@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from sniper.core.app import SniperBot
@@ -36,6 +36,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         .up{color:var(--green);font-weight:650}.down{color:var(--red);font-weight:650}.empty{padding:28px;text-align:center;color:var(--muted)}
         .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 8px;font-size:12px;border:1px solid var(--line);background:#fff}.ok{color:var(--green);border-color:#b7e4c7;background:#f0fff4}.fail{color:var(--red);border-color:#ffc9c9;background:#fff5f5}.wait{color:var(--amber);border-color:#ffe0a3;background:#fff9db}
         .detail h2{font-size:18px;margin:0 0 2px}.detail .mintline{font-size:12px;color:var(--muted);word-break:break-all}.score{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.checks{display:grid;gap:8px;margin-top:10px}.check{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:start;border-top:1px solid var(--line);padding-top:8px}.check strong{font-size:13px}.check small{display:block;color:var(--muted)}.reasons{margin-top:12px}.reason{font-size:12px;color:#6b1f1f;background:#fff5f5;border:1px solid #ffd6d6;border-radius:6px;padding:7px;margin-top:6px}
+        .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.field label{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}.field input{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px;background:#fff}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.btn2{border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#fff;font-weight:650;cursor:pointer}.btn2:hover{background:#eef2f7}.btn2.buy{border-color:#b7e4c7;background:#f0fff4}.btn2.sell{border-color:#ffc9c9;background:#fff5f5}
         a.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;padding:5px 8px;color:#111;text-decoration:none;background:#fff;font-size:12px;font-weight:650}a.btn:hover{background:#eef2f7}.accepted{margin-top:14px}.accepted-list{display:flex;gap:8px;overflow:auto;padding:10px}.accepted-card{min-width:210px;border:1px solid #b7e4c7;background:#f0fff4;border-radius:8px;padding:9px}.accepted-card strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.accepted-card .meta{margin:3px 0 8px}
         @keyframes flash{from{background:#ecfdf3}to{background:transparent}}
         @media(max-width:900px){.layout{grid-template-columns:1fr}.detail{order:-1}}@media(max-width:720px){main{margin:16px auto}th:nth-child(2),td:nth-child(2){display:none}th,td{padding:10px 8px}}
@@ -43,7 +44,14 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         <main>
           <header><div><h1>Pump Scanner</h1><div class="meta">Paper mode · top 7 live candidates · obvious junk hidden</div></div><div id="count" class="meta">0 projects</div></header>
           <div id="stats" class="stats"></div>
+          <section class="panel accepted"><div class="pad"><strong>Runtime Controls</strong><div class="meta">In-memory paper controls. YAML defaults stay unchanged.</div><div id="controls" class="controls" style="margin-top:10px"></div><div class="actions"><button class="btn2" id="saveSettings">Save controls</button><button class="btn2" id="toggleRun">Pause/Resume</button><button class="btn2 buy" id="manualBuy">Manual paper buy selected</button><button class="btn2 sell" id="manualSell">Sell selected position</button></div><div id="controlMsg" class="meta" style="margin-top:8px"></div></div></section>
           <section class="panel accepted"><div class="pad" style="padding-bottom:0"><strong>Accepted / Ready</strong><div class="meta">Open strongest candidates in GMGN</div></div><div id="accepted" class="accepted-list"><div class="meta">No accepted tokens yet.</div></div></section>
+          <section class="trade-table">
+            <table>
+              <thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Size</th><th>Remain</th><th>Realized</th><th>Unrealized</th><th>Stop</th><th>Age</th><th>Open</th></tr></thead>
+              <tbody id="positions"><tr><td class="empty" colspan="10">No open positions.</td></tr></tbody>
+            </table>
+          </section>
           <div class="layout" style="margin-top:14px">
             <section>
               <table>
@@ -61,9 +69,9 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
           </section>
         </main>
         <script>
-        const tbody=document.getElementById('tokens'), tradeBody=document.getElementById('trades'), count=document.getElementById('count');
-        const detail=document.getElementById('detail'), stats=document.getElementById('stats'), accepted=document.getElementById('accepted');
-        const seen=new Set(); const byMint=new Map(); let rows=[], selected=null;
+        const tbody=document.getElementById('tokens'), tradeBody=document.getElementById('trades'), positionBody=document.getElementById('positions'), count=document.getElementById('count');
+        const detail=document.getElementById('detail'), stats=document.getElementById('stats'), accepted=document.getElementById('accepted'), controls=document.getElementById('controls'), controlMsg=document.getElementById('controlMsg');
+        const seen=new Set(); const byMint=new Map(); let rows=[], selected=null, settingsLoaded=false, settings=null;
         const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
         const price=v=>Number(v||0).toLocaleString(undefined,{maximumFractionDigits:6});
         const compact=n=>{n=Number(n||0);return Math.abs(n)>=1e6?(n/1e6).toFixed(1)+'M':Math.abs(n)>=1e3?(n/1e3).toFixed(1)+'K':n.toFixed(n<10?2:0)};
@@ -103,6 +111,41 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
           if(!s)return; const p=s.performance||{};
           stats.innerHTML=`<div class="stat"><b>${Number(s.balance_sol||0).toFixed(3)} SOL</b><span class="meta">paper balance</span></div><div class="stat"><b>${p.signals||0}</b><span class="meta">signals</span></div><div class="stat"><b>${p.accepted_signals||0}</b><span class="meta">accepted</span></div><div class="stat"><b>${p.skipped_signals||0}</b><span class="meta">skipped</span></div><div class="stat"><b>${(s.positions||[]).length}</b><span class="meta">positions</span></div>`;
         }
+        const controlFields=[
+          ['risk.max_entry_size_sol','entry size SOL'],['risk.max_deposit_pct_per_trade','deposit % / trade'],['risk.max_concurrent_positions','max positions'],['risk.cooldown_seconds','cooldown sec'],
+          ['entry.min_score','min score'],['filters.min_age_seconds','min age sec'],['filters.min_liquidity_sol','min liquidity'],['filters.min_unique_buyers_60s','min buyers'],
+          ['filters.min_buy_velocity','min buy velocity'],['filters.min_volume_60s_sol','min volume 60s'],['filters.min_momentum_30s_pct','min momentum'],['filters.max_wash_trade_score','max wash'],
+          ['filters.max_bot_activity_score','max bot'],['exits.stop_loss_pct','stop loss'],['exits.trailing_stop_pct','trailing stop']
+        ];
+        const getPath=(o,p)=>p.split('.').reduce((a,k)=>a?.[k],o);
+        const setPath=(o,p,v)=>{const a=p.split('.');let x=o;for(const k of a.slice(0,-1)){if(!x[k])x[k]={};x=x[k]}x[a[a.length-1]]=Number(v)};
+        function renderControls(s){
+          if(settingsLoaded)return; settings=s; settingsLoaded=true;
+          controls.innerHTML=controlFields.map(([path,label])=>`<div class="field"><label>${esc(label)}</label><input data-path="${path}" value="${esc(getPath(s,path))}"></div>`).join('');
+        }
+        async function saveSettings(){
+          const payload={risk:{},filters:{},exits:{},entry:{}};
+          controls.querySelectorAll('input').forEach(i=>setPath(payload,i.dataset.path,i.value));
+          settings=await fetch('/api/settings',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+          settingsLoaded=false; renderControls(settings); controlMsg.textContent='Saved runtime controls';
+        }
+        async function toggleRun(){
+          const next=!(settings?.running);
+          settings=await fetch('/api/settings',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({running:next})}).then(r=>r.json());
+          settingsLoaded=false; renderControls(settings); controlMsg.textContent=next?'Bot resumed':'Bot paused';
+        }
+        async function manualBuy(){
+          if(!selected)return controlMsg.textContent='Select token first';
+          const size=Number(getPath(settings,'risk.max_entry_size_sol')||0);
+          const r=await fetch('/api/manual/buy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mint:selected,size_sol:size})}).then(r=>r.json());
+          controlMsg.textContent=r.ok?'Manual buy sent':('Manual buy failed: '+r.error);
+        }
+        async function manualSell(){
+          if(!selected)return controlMsg.textContent='Select token first';
+          const r=await fetch('/api/manual/sell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mint:selected,sell_pct:1})}).then(r=>r.json());
+          controlMsg.textContent=r.ok?'Manual sell sent':('Manual sell failed: '+r.error);
+        }
+        document.addEventListener('click',e=>{if(e.target.id==='saveSettings')saveSettings();if(e.target.id==='toggleRun')toggleRun();if(e.target.id==='manualBuy')manualBuy();if(e.target.id==='manualSell')manualSell();});
         function renderAccepted(items){
           const list=items.filter(t=>t.entry_state==='ok'||t.accepted).slice(0,12);
           accepted.innerHTML=list.length?list.map(t=>`<div class="accepted-card"><strong>${esc(t.name||t.symbol||'Unknown')}</strong><div class="meta">${esc(t.mint)}</div><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">Open GMGN</a></div>`).join(''):'<div class="meta">No accepted tokens yet.</div>';
@@ -110,12 +153,21 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         function renderTrades(items){
           tradeBody.innerHTML=items.length?items.slice(0,25).map(t=>`<tr><td>${esc(t.created_at)}</td><td class="mint">${esc(t.mint)}</td><td>${esc(t.side)}</td><td>${compact(t.size_sol)} SOL</td><td>${price(t.price_sol)}</td><td class="${Number(t.pnl_sol)>=0?'up':'down'}">${Number(t.pnl_sol||0).toFixed(5)}</td><td>${esc(t.reason)}</td><td><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">GMGN</a></td></tr>`).join(''):'<tr><td class="empty" colspan="8">No trades yet.</td></tr>';
         }
+        function renderPositions(items,tokens){
+          const live=new Map(tokens.map(t=>[t.mint,t]));
+          positionBody.innerHTML=items.length?items.map(p=>{
+            const t=live.get(p.mint)||{}, now=Number(t.price||p.entry_price||0), remain=Number(p.remaining_pct||0);
+            const unreal=(now-Number(p.entry_price||0))*Number(p.token_amount||0)*remain;
+            const ageSec=(Date.now()-new Date(p.opened_at).getTime())/1000;
+            return `<tr><td class="mint">${esc(p.symbol||p.mint)}</td><td>${price(p.entry_price)}</td><td>${price(now)}</td><td>${Number(p.size_sol||0).toFixed(4)} SOL</td><td>${(remain*100).toFixed(0)}%</td><td class="${Number(p.realized_pnl_sol)>=0?'up':'down'}">${Number(p.realized_pnl_sol||0).toFixed(5)}</td><td class="${unreal>=0?'up':'down'}">${unreal.toFixed(5)}</td><td>${price(p.stop_loss_price)}</td><td>${age(ageSec)}</td><td><a class="btn" href="${gmgn(p.mint)}" target="_blank" rel="noopener">GMGN</a></td></tr>`;
+          }).join(''):'<tr><td class="empty" colspan="10">No open positions.</td></tr>';
+        }
         tbody.addEventListener('click',e=>{const tr=e.target.closest('tr[data-mint]');if(!tr)return;selected=tr.dataset.mint;showDetail(byMint.get(selected));});
         let timer; async function poll(){
           clearTimeout(timer);
           try{
-            const [tokens,status,trades]=await Promise.all([fetch('/api/tokens?limit=7',{cache:'no-store'}).then(r=>r.json()),fetch('/api/status',{cache:'no-store'}).then(r=>r.json()),fetch('/api/trades',{cache:'no-store'}).then(r=>r.json())]);
-            render(tokens); renderStats(status); renderAccepted(tokens); renderTrades(trades);
+            const [tokens,status,trades,cfg]=await Promise.all([fetch('/api/tokens?limit=7',{cache:'no-store'}).then(r=>r.json()),fetch('/api/status',{cache:'no-store'}).then(r=>r.json()),fetch('/api/trades',{cache:'no-store'}).then(r=>r.json()),fetch('/api/settings',{cache:'no-store'}).then(r=>r.json())]);
+            settings=cfg; render(tokens); renderStats(status); renderAccepted(tokens); renderPositions(status.positions||[],tokens); renderTrades(trades); renderControls(cfg);
           }catch(e){console.warn(e)}
           timer=setTimeout(poll,2000);
         } poll();
@@ -147,6 +199,30 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
             }
             for t in repo.last_trades(50)
         ]
+
+    @app.get("/api/settings")
+    async def settings() -> dict:
+        if not bot:
+            raise HTTPException(status_code=503, detail="bot unavailable")
+        return bot.settings_snapshot()
+
+    @app.patch("/api/settings")
+    async def update_settings(payload: dict) -> dict:
+        if not bot:
+            raise HTTPException(status_code=503, detail="bot unavailable")
+        return bot.update_settings(payload)
+
+    @app.post("/api/manual/buy")
+    async def manual_buy(payload: dict) -> dict:
+        if not bot:
+            raise HTTPException(status_code=503, detail="bot unavailable")
+        return await bot.manual_buy(str(payload.get("mint", "")), float(payload.get("size_sol") or 0))
+
+    @app.post("/api/manual/sell")
+    async def manual_sell(payload: dict) -> dict:
+        if not bot:
+            raise HTTPException(status_code=503, detail="bot unavailable")
+        return await bot.manual_sell(str(payload.get("mint", "")), float(payload.get("sell_pct") or 1))
 
     @app.get("/api/signals")
     async def signals(limit: int = 100, skipped_only: bool = False) -> list[dict]:

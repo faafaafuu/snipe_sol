@@ -52,6 +52,90 @@ class SniperBot:
         self.positions: dict[str, Position] = {}
         self.running = True
 
+    def settings_snapshot(self) -> dict:
+        f = self.cfg.active_filter
+        r = self.cfg.risk
+        e = self.cfg.active_exit
+        return {
+            "mode": self.cfg.mode.value,
+            "strategy_mode": self.cfg.strategy_mode,
+            "running": self.running,
+            "entry": {"min_score": self.entry.min_score},
+            "risk": {
+                "max_entry_size_sol": r.max_entry_size_sol,
+                "max_deposit_pct_per_trade": r.max_deposit_pct_per_trade,
+                "max_concurrent_positions": r.max_concurrent_positions,
+                "daily_loss_limit_pct": r.daily_loss_limit_pct,
+                "max_loss_streak": r.max_loss_streak,
+                "cooldown_seconds": r.cooldown_seconds,
+            },
+            "filters": {
+                "min_age_seconds": f.min_age_seconds,
+                "max_age_seconds": f.max_age_seconds,
+                "min_liquidity_sol": f.min_liquidity_sol,
+                "min_unique_buyers_60s": f.min_unique_buyers_60s,
+                "min_buy_velocity": f.min_buy_velocity,
+                "min_volume_60s_sol": f.min_volume_60s_sol,
+                "max_initial_market_cap_sol": f.max_initial_market_cap_sol,
+                "max_slippage_pct": f.max_slippage_pct,
+                "max_wash_trade_score": f.max_wash_trade_score,
+                "max_bot_activity_score": f.max_bot_activity_score,
+                "min_momentum_30s_pct": f.min_momentum_30s_pct,
+            },
+            "exits": {
+                "stop_loss_pct": e.stop_loss_pct,
+                "time_exit_seconds": e.time_exit_seconds,
+                "trailing_stop_pct": e.trailing_stop_pct,
+                "emergency_liquidity_drop_pct": e.emergency_liquidity_drop_pct,
+                "emergency_whale_dump_pct": e.emergency_whale_dump_pct,
+            },
+        }
+
+    def update_settings(self, payload: dict) -> dict:
+        for key, value in payload.get("risk", {}).items():
+            if hasattr(self.cfg.risk, key):
+                setattr(self.cfg.risk, key, _coerce_setting(key, value))
+        for key, value in payload.get("filters", {}).items():
+            if hasattr(self.cfg.active_filter, key):
+                setattr(self.cfg.active_filter, key, _coerce_setting(key, value))
+        for key, value in payload.get("exits", {}).items():
+            if hasattr(self.cfg.active_exit, key):
+                setattr(self.cfg.active_exit, key, _coerce_setting(key, value))
+        if "entry" in payload and "min_score" in payload["entry"]:
+            self.entry.min_score = float(payload["entry"]["min_score"])
+        if "running" in payload:
+            self.running = bool(payload["running"])
+        return self.settings_snapshot()
+
+    async def manual_buy(self, mint: str, size_sol: float | None = None) -> dict:
+        meta = self.aggregator.metadata.get(mint)
+        metrics = self.aggregator.metrics(mint, datetime.now(timezone.utc))
+        if not meta or not metrics or metrics.price_sol <= 0:
+            return {"ok": False, "error": "token has no live price/metadata yet"}
+        size = size_sol if size_sol and size_sol > 0 else min(self.cfg.risk.max_entry_size_sol, self.risk.current_balance_sol * self.cfg.risk.max_deposit_pct_per_trade)
+        await self._enter(meta.symbol, mint, metrics.price_sol, size, "manual paper entry")
+        return {"ok": mint in self.positions, "mint": mint, "size_sol": size}
+
+    async def manual_sell(self, mint: str, sell_pct: float = 1.0) -> dict:
+        position = self.positions.get(mint)
+        if not position:
+            return {"ok": False, "error": "position not found"}
+        metrics = self.aggregator.metrics(mint, datetime.now(timezone.utc))
+        if not metrics or metrics.price_sol <= 0:
+            return {"ok": False, "error": "token has no live price"}
+        result = await self.broker.sell(position, metrics.price_sol, sell_pct, self.cfg.active_filter.max_slippage_pct)
+        if not result.ok:
+            return {"ok": False, "error": result.error}
+        cost_basis = position.size_sol * sell_pct
+        pnl = result.size_sol - cost_basis
+        position.realized_pnl_sol += pnl
+        position.remaining_pct -= sell_pct
+        self.risk.record_exit(pnl, result.size_sol)
+        self.repo.save_trade(result, "manual paper exit", pnl_sol=pnl, paper=self.cfg.mode != TradingMode.LIVE)
+        if position.remaining_pct <= 0.0001:
+            self.positions.pop(mint, None)
+        return {"ok": True, "mint": mint, "pnl_sol": pnl}
+
     async def run(self) -> None:
         log.info("starting sniper bot mode=%s strategy=%s", self.cfg.mode.value, self.cfg.strategy_mode)
         await self.notifier.send(f"Sniper bot started: mode={self.cfg.mode.value}, strategy={self.cfg.strategy_mode}")
@@ -171,3 +255,9 @@ class SniperBot:
         if command == "/paper_off":
             return "Live mode is disabled until live adapter/keypair/RPC are configured and process is restarted with TRADING_MODE=live"
         return "Unknown command"
+
+
+def _coerce_setting(key: str, value):
+    if key in {"max_concurrent_positions", "max_loss_streak", "cooldown_seconds", "min_age_seconds", "max_age_seconds", "time_exit_seconds"}:
+        return int(value)
+    return float(value)
