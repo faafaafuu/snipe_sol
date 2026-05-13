@@ -1,0 +1,129 @@
+mode: paper
+strategy_mode: balanced
+log_level: INFO
+
+scanner:
+  websocket_url: null
+  polling_url: null
+  polling_interval_seconds: 2
+  auto_subscribe_trades: true
+  max_watched_tokens: 100
+  watch_seconds: 120
+  aggregation_window_seconds: 60
+
+storage:
+  database_url: sqlite:///data/sniper.db
+  raw_event_retention_days: 14
+
+rpc:
+  endpoints:
+    - https://api.mainnet-beta.solana.com
+  commitment: confirmed
+  max_retries: 3
+  priority_fee_micro_lamports: 20000
+  compute_unit_limit: 120000
+
+risk:
+  max_entry_size_sol: 0.08
+  max_deposit_pct_per_trade: 0.02
+  max_concurrent_positions: 2
+  daily_loss_limit_pct: 0.04
+  max_loss_streak: 3
+  cooldown_seconds: 20
+  min_sol_balance: 0.05
+  max_priority_fee_sol: 0.01
+
+filters:
+  ultra_safe:
+    min_age_seconds: 10
+    max_age_seconds: 180
+    min_liquidity_sol: 45
+    min_unique_buyers_60s: 22
+    min_buy_velocity: 0.45
+    min_volume_60s_sol: 30
+    max_top10_holder_pct: 0.20
+    max_top1_holder_pct: 0.055
+    max_creator_allocation_pct: 0.025
+    max_creator_holder_pct: 0.02
+    max_initial_market_cap_sol: 220
+    max_slippage_pct: 0.05
+    max_wash_trade_score: 0.18
+    max_bot_activity_score: 0.28
+    min_momentum_30s_pct: 0.10
+  balanced:
+    min_age_seconds: 7
+    max_age_seconds: 240
+    min_liquidity_sol: 25
+    min_unique_buyers_60s: 12
+    min_buy_velocity: 0.25
+    min_volume_60s_sol: 12
+    max_top10_holder_pct: 0.30
+    max_top1_holder_pct: 0.08
+    max_creator_allocation_pct: 0.04
+    max_creator_holder_pct: 0.035
+    max_initial_market_cap_sol: 350
+    max_slippage_pct: 0.08
+    max_wash_trade_score: 0.30
+    max_bot_activity_score: 0.45
+    min_momentum_30s_pct: 0.05
+  aggressive:
+    min_age_seconds: 4
+    max_age_seconds: 360
+    min_liquidity_sol: 12
+    min_unique_buyers_60s: 7
+    min_buy_velocity: 0.14
+    min_volume_60s_sol: 5
+    max_top10_holder_pct: 0.40
+    max_top1_holder_pct: 0.12
+    max_creator_allocation_pct: 0.06
+    max_creator_holder_pct: 0.05
+    max_initial_market_cap_sol: 550
+    max_slippage_pct: 0.12
+    max_wash_trade_score: 0.42
+    max_bot_activity_score: 0.60
+    min_momentum_30s_pct: 0.025
+
+exits:
+  ultra_safe:
+    stop_loss_pct: 0.10
+    time_exit_seconds: 150
+    emergency_liquidity_drop_pct: 0.18
+    emergency_whale_dump_pct: 0.10
+    break_even_after_tp1: true
+    trailing_stop_pct: 0.12
+    take_profit_ladder:
+      - { gain_pct: 0.18, sell_pct: 0.40 }
+      - { gain_pct: 0.40, sell_pct: 0.35 }
+      - { gain_pct: 0.80, sell_pct: 0.25 }
+  balanced:
+    stop_loss_pct: 0.15
+    time_exit_seconds: 240
+    emergency_liquidity_drop_pct: 0.25
+    emergency_whale_dump_pct: 0.16
+    break_even_after_tp1: true
+    trailing_stop_pct: 0.18
+    take_profit_ladder:
+      - { gain_pct: 0.25, sell_pct: 0.35 }
+      - { gain_pct: 0.55, sell_pct: 0.35 }
+      - { gain_pct: 1.10, sell_pct: 0.30 }
+  aggressive:
+    stop_loss_pct: 0.20
+    time_exit_seconds: 360
+    emergency_liquidity_drop_pct: 0.32
+    emergency_whale_dump_pct: 0.22
+    break_even_after_tp1: true
+    trailing_stop_pct: 0.22
+    take_profit_ladder:
+      - { gain_pct: 0.35, sell_pct: 0.30 }
+      - { gain_pct: 0.80, sell_pct: 0.35 }
+      - { gain_pct: 1.60, sell_pct: 0.35 }
+
+telegram:
+  enabled: false
+
+dashboard:
+  host: 0.0.0.0
+  port: 8080
+
+blacklist_wallets: []
+whitelist_wallets: []
