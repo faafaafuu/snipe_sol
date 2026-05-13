@@ -31,7 +31,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         table{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
         th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
         th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fafafa}
-        tbody tr{cursor:pointer;transition:background .12s ease}tbody tr:hover,tbody tr.selected{background:#f1f5f9}tbody tr.new{animation:flash .8s ease}
+        tbody tr{cursor:pointer;transition:background .12s ease}tbody tr:hover,tbody tr.selected{background:#f1f5f9}tbody tr.new{animation:flash .8s ease}.trade-table{margin-top:14px}
         td.name{font-weight:650;white-space:normal}td.mint{max-width:180px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:12px}
         .up{color:var(--green);font-weight:650}.down{color:var(--red);font-weight:650}.empty{padding:28px;text-align:center;color:var(--muted)}
         .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 8px;font-size:12px;border:1px solid var(--line);background:#fff}.ok{color:var(--green);border-color:#b7e4c7;background:#f0fff4}.fail{color:var(--red);border-color:#ffc9c9;background:#fff5f5}.wait{color:var(--amber);border-color:#ffe0a3;background:#fff9db}
@@ -41,7 +41,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
         @media(max-width:900px){.layout{grid-template-columns:1fr}.detail{order:-1}}@media(max-width:720px){main{margin:16px auto}th:nth-child(2),td:nth-child(2){display:none}th,td{padding:10px 8px}}
         </style></head><body>
         <main>
-          <header><div><h1>Pump Scanner</h1><div class="meta">Paper mode · candidates newest first · click a token for entry checks</div></div><div id="count" class="meta">0 tokens</div></header>
+          <header><div><h1>Pump Scanner</h1><div class="meta">Paper mode · top 7 live candidates · obvious junk hidden</div></div><div id="count" class="meta">0 projects</div></header>
           <div id="stats" class="stats"></div>
           <section class="panel accepted"><div class="pad" style="padding-bottom:0"><strong>Accepted / Ready</strong><div class="meta">Open strongest candidates in GMGN</div></div><div id="accepted" class="accepted-list"><div class="meta">No accepted tokens yet.</div></div></section>
           <div class="layout" style="margin-top:14px">
@@ -53,9 +53,15 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
             </section>
             <aside class="panel detail"><div id="detail" class="pad"><div class="empty">Select a token</div></div></aside>
           </div>
+          <section class="trade-table">
+            <table>
+              <thead><tr><th>Time</th><th>Token</th><th>Side</th><th>Size</th><th>Price</th><th>PnL</th><th>Reason</th><th>Open</th></tr></thead>
+              <tbody id="trades"><tr><td class="empty" colspan="8">No trades yet.</td></tr></tbody>
+            </table>
+          </section>
         </main>
         <script>
-        const tbody=document.getElementById('tokens'), count=document.getElementById('count');
+        const tbody=document.getElementById('tokens'), tradeBody=document.getElementById('trades'), count=document.getElementById('count');
         const detail=document.getElementById('detail'), stats=document.getElementById('stats'), accepted=document.getElementById('accepted');
         const seen=new Set(); const byMint=new Map(); let rows=[], selected=null;
         const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -77,9 +83,9 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
             if(!seen.has(t.mint)){seen.add(t.mint);rows.unshift(t);fresh.push(t)}
             else rows=rows.map(x=>x.mint===t.mint?t:x);
           }
-          rows=rows.slice(0,50); for(const m of [...seen])if(!rows.find(x=>x.mint===m))seen.delete(m);
+          rows=rows.slice(0,7); for(const m of [...seen])if(!rows.find(x=>x.mint===m))seen.delete(m);
           if(rows.length){tbody.innerHTML=rows.map(row).join('')}
-          count.textContent=rows.length+' tokens';
+          count.textContent=rows.length+' projects';
           if(!selected&&rows[0])selected=rows[0].mint;
           if(selected)showDetail(byMint.get(selected)||rows.find(x=>x.mint===selected));
           setTimeout(()=>document.querySelectorAll('tr.new').forEach(x=>x.classList.remove('new')),900);
@@ -101,12 +107,15 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
           const list=items.filter(t=>t.entry_state==='ok'||t.accepted).slice(0,12);
           accepted.innerHTML=list.length?list.map(t=>`<div class="accepted-card"><strong>${esc(t.name||t.symbol||'Unknown')}</strong><div class="meta">${esc(t.mint)}</div><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">Open GMGN</a></div>`).join(''):'<div class="meta">No accepted tokens yet.</div>';
         }
+        function renderTrades(items){
+          tradeBody.innerHTML=items.length?items.slice(0,25).map(t=>`<tr><td>${esc(t.created_at)}</td><td class="mint">${esc(t.mint)}</td><td>${esc(t.side)}</td><td>${compact(t.size_sol)} SOL</td><td>${price(t.price_sol)}</td><td class="${Number(t.pnl_sol)>=0?'up':'down'}">${Number(t.pnl_sol||0).toFixed(5)}</td><td>${esc(t.reason)}</td><td><a class="btn" href="${gmgn(t.mint)}" target="_blank" rel="noopener">GMGN</a></td></tr>`).join(''):'<tr><td class="empty" colspan="8">No trades yet.</td></tr>';
+        }
         tbody.addEventListener('click',e=>{const tr=e.target.closest('tr[data-mint]');if(!tr)return;selected=tr.dataset.mint;showDetail(byMint.get(selected));});
         let timer; async function poll(){
           clearTimeout(timer);
           try{
-            const [tokens,status]=await Promise.all([fetch('/api/tokens?limit=50',{cache:'no-store'}).then(r=>r.json()),fetch('/api/status',{cache:'no-store'}).then(r=>r.json())]);
-            render(tokens); renderStats(status); renderAccepted(tokens);
+            const [tokens,status,trades]=await Promise.all([fetch('/api/tokens?limit=7',{cache:'no-store'}).then(r=>r.json()),fetch('/api/status',{cache:'no-store'}).then(r=>r.json()),fetch('/api/trades',{cache:'no-store'}).then(r=>r.json())]);
+            render(tokens); renderStats(status); renderAccepted(tokens); renderTrades(trades);
           }catch(e){console.warn(e)}
           timer=setTimeout(poll,2000);
         } poll();
@@ -156,7 +165,7 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
 
     @app.get("/api/tokens")
     async def tokens(limit: int = 50) -> list[dict]:
-        return _token_rows(repo, bot, limit)
+        return _token_rows(repo, bot, min(limit, 7))
 
     @app.get("/api/accepted")
     async def accepted(limit: int = 20) -> list[dict]:
@@ -167,12 +176,29 @@ def create_dashboard(repo: Repository, bot: SniperBot | None = None) -> FastAPI:
 
 
 def _token_rows(repo: Repository, bot: SniperBot | None, limit: int) -> list[dict]:
-    rows = repo.last_raw_events(min(max(limit, 1), 200))
+    rows = repo.last_raw_events(300)
     latest_by_mint = {}
     for row in rows:
         latest_by_mint.setdefault(row.mint, row)
     signal_map = {s.mint: s for s in repo.last_signals(500)}
-    return [_event_to_token(row, bot, signal_map.get(row.mint)) for row in latest_by_mint.values()][:limit]
+    tokens = [_event_to_token(row, bot, signal_map.get(row.mint)) for row in latest_by_mint.values()]
+    visible = [t for t in tokens if not _is_obvious_junk(t)]
+    visible.sort(key=lambda t: (t["accepted"], t["entry_state"] == "ok", t["ok_count"], t["volume"], t["buyers"], t["seen_at"]), reverse=True)
+    return visible[:limit]
+
+
+def _is_obvious_junk(token: dict) -> bool:
+    if token["price"] <= 0 or token["liquidity"] <= 0 or token["market_cap"] <= 0:
+        return True
+    if token["age_seconds"] > 10 and token["volume"] <= 0:
+        return True
+    if token["age_seconds"] > 20 and token["buyers"] == 0:
+        return True
+    if token.get("wash", 0) >= 0.85 or token.get("bot_score", 0) >= 0.92:
+        return True
+    if token["age_seconds"] > 15 and token["ok_count"] <= 2 and token["entry_state"] != "ok":
+        return True
+    return False
 
 
 def _event_to_token(row, bot: SniperBot | None = None, signal=None) -> dict:
@@ -216,6 +242,8 @@ def _event_to_token(row, bot: SniperBot | None = None, signal=None) -> dict:
         "liquidity": liquidity,
         "market_cap": market_cap,
         "buy_velocity": velocity,
+        "wash": wash,
+        "bot_score": bot_score,
         "entry_state": entry_state,
         "entry_label": entry_label,
         "accepted": accepted,
